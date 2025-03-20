@@ -29,21 +29,29 @@ int init_allocator()
 void *malloc(size_t size)
 {
   init_allocator();
-  // fprintf(stderr, "Try to malloc(%ld).\n", size);
-  return heap_alloc(&g_heap, size);
+  fprintf(stderr, "Try to malloc(%ld).\n", size);
+  if (size == 0) {
+    return NULL;
+  }
+  void *p = heap_alloc(&g_heap, size);
+  fprintf(stderr, "==> malloc(%ld) = %p.\n", size, p);
+  return p;
 }
 
 void *calloc(size_t count, size_t size)
 {
   init_allocator();
   size_t realsize = count * size;
-  // fprintf(stderr, "Try to calloc(%ld).\n", realsize);
+  if (realsize == 0) {
+    return NULL;
+  }
+  fprintf(stderr, "Try to calloc(%ld).\n", realsize);
   char *p = heap_alloc(&g_heap, realsize);
   if (p != NULL)
   {                         // Check if allocation was successful before zeroing
     memset(p, 0, realsize); // Use memset for efficient zeroing
   }
-  // fprintf(stderr, "Try to calloc(%ld) = %p.\n", realsize, p);
+  fprintf(stderr, "==> calloc(%ld) = %p.\n", realsize, p);
   return p;
 }
 
@@ -53,9 +61,16 @@ node_t *wrapper_get_node(void *p)
   return head;
 }
 
+void free(void *p)
+{
+  heap_free(&g_heap, p);
+}
+
 void *realloc(void *p, size_t size)
 {
   init_allocator();
+
+  fprintf(stderr, "Try to realloc(%p, %d).\n", p, size);
 
   if (p == NULL)
   {
@@ -67,20 +82,32 @@ void *realloc(void *p, size_t size)
     free(p); // realloc to 0 is same as free and return NULL
     return NULL;
   }
+  node_t *node = wrapper_get_node(p);
+  size_t old_size = node->size;
+
+  if (size <= old_size) {
+    return p;
+  }
 
   char *ret = heap_alloc(&g_heap, size);
-  if (ret != NULL)
-  { // Check if allocation was successful before copying
-    node_t *node = wrapper_get_node(p);
-    size_t old_size = node->size;
-
-    memcpy(ret, p, MIN(size, old_size)); // Use memcpy for efficient copying
-    free(p);                             // Free the old pointer after successful reallocation
+  if (ret != NULL) { 
+    memcpy(ret, p, old_size); 
+    free(p);
+  } else {
+    return NULL;
   }
+  fprintf(stderr, "==> realloc(%p, %ld) = %p.\n", p, size, ret);
   return ret;
 }
 
-void free(void *p)
-{
-  heap_free(&g_heap, p);
-}
+cfree(void *p) {}
+
+aligned_alloc(size_t alignment, size_t size){}
+
+posix_memalign(void **memptr, size_t alignment, size_t size) {}
+
+memalign(size_t alignment, size_t size) {}
+
+valloc(size_t size) {}
+
+pvalloc(size_t size) {}
