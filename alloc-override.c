@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <string.h> // For memset and memcpy
+#include <stdlib.h> // For abort and other standard library functions
 #include "include/heap.h"
+#include <errno.h> // For ENOMEM
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
@@ -30,7 +32,8 @@ void *malloc(size_t size)
 {
   init_allocator();
   fprintf(stderr, "Try to malloc(%ld).\n", size);
-  if (size == 0) {
+  if (size == 0)
+  {
     return NULL;
   }
   void *p = heap_alloc(&g_heap, size);
@@ -42,10 +45,11 @@ void *calloc(size_t count, size_t size)
 {
   init_allocator();
   size_t realsize = count * size;
-  if (realsize == 0) {
+  if (realsize == 0)
+  {
     return NULL;
   }
-  fprintf(stderr, "Try to calloc(%ld).\n", realsize);
+  fprintf(stderr, "Try to calloc(%ld, %ld) = %ld.\n", count, size, realsize);
   char *p = heap_alloc(&g_heap, realsize);
   if (p != NULL)
   {                         // Check if allocation was successful before zeroing
@@ -63,6 +67,13 @@ node_t *wrapper_get_node(void *p)
 
 void free(void *p)
 {
+  if (p == NULL)
+  {
+    fprintf(stderr, "free(NULL) called.\n");
+    return;
+  }
+
+  fprintf(stderr, "free(%p) - allocated with malloc/calloc/realloc, freeing directly.\n", p);
   heap_free(&g_heap, p);
 }
 
@@ -70,44 +81,80 @@ void *realloc(void *p, size_t size)
 {
   init_allocator();
 
-  fprintf(stderr, "Try to realloc(%p, %d).\n", p, size);
+  fprintf(stderr, "Try to realloc(%p, %ld).\n", p, size);
 
   if (p == NULL)
   {
-    return malloc(size); // realloc on NULL is same as malloc
+    void *ret = malloc(size);
+    fprintf(stderr, "realloc(NULL, %ld) equivalent to malloc, returning %p.\n", size, ret);
+    return ret; // realloc on NULL is same as malloc
   }
 
   if (size == 0)
   {
     free(p); // realloc to 0 is same as free and return NULL
+    fprintf(stderr, "realloc(%p, 0) equivalent to free and returning NULL.\n", p);
     return NULL;
   }
   node_t *node = wrapper_get_node(p);
   size_t old_size = node->size;
 
-  if (size <= old_size) {
+  if (size <= old_size)
+  {
+    fprintf(stderr, "realloc(%p, %ld) requested size is <= old size, returning original pointer.\n", p, size);
     return p;
   }
 
   char *ret = heap_alloc(&g_heap, size);
-  if (ret != NULL) { 
-    memcpy(ret, p, old_size); 
+  if (ret != NULL)
+  {
+    memcpy(ret, p, MIN(old_size, size)); // Copy the smaller of the two sizes
     free(p);
-  } else {
+    fprintf(stderr, "realloc(%p, %ld) allocated new block %p, copied %ld bytes, and freed old block.\n", p, size, ret, MIN(old_size, size));
+  }
+  else
+  {
+    fprintf(stderr, "realloc(%p, %ld) allocation failed, returning NULL.\n", p, size);
     return NULL;
   }
   fprintf(stderr, "==> realloc(%p, %ld) = %p.\n", p, size, ret);
   return ret;
 }
 
-cfree(void *p) {}
+// Historically equivalent to free, but now deprecated.  Just call free.
+void cfree(void *p)
+{
+  fprintf(stderr, "cfree(%p) called (equivalent to free).\n", p);
+  free(p);
+}
 
-aligned_alloc(size_t alignment, size_t size){}
+void *aligned_alloc(size_t alignment, size_t size)
+{
+  fprintf(stderr, "aligned_alloc(%ld, %ld) called, using malloc.\n", alignment, size);
+  return malloc(size);
+}
 
-posix_memalign(void **memptr, size_t alignment, size_t size) {}
+int posix_memalign(void **memptr, size_t alignment, size_t size)
+{
+  fprintf(stderr, "posix_memalign(0x%lx, %ld, %ld) called, using malloc.\n", (unsigned long)memptr, alignment, size);
+  *memptr = malloc(size);
+  return (*memptr == NULL) ? ENOMEM : 0;
+}
 
-memalign(size_t alignment, size_t size) {}
+void *memalign(size_t alignment, size_t size)
+{
+  fprintf(stderr, "memalign(%ld, %ld) called, using malloc.\n", alignment, size);
+  return malloc(size);
+}
 
-valloc(size_t size) {}
+void *valloc(size_t size)
+{
+  fprintf(stderr, "valloc(%ld) called, using malloc.\n", size);
+  return malloc(size);
+}
 
-pvalloc(size_t size) {}
+void *pvalloc(size_t size)
+{
+  fprintf(stderr, "pvalloc(%ld) called, using malloc.\n", size);
+  return malloc(size);
+}
