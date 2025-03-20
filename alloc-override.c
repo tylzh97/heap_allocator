@@ -5,6 +5,7 @@
 #include <errno.h> // For ENOMEM
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define ALIGNED_ALLOC_MAGIC 0x12345678
 
 heap_t g_heap;
 bin_t g_bins[BIN_COUNT] = {'\0'};
@@ -73,8 +74,16 @@ void free(void *p)
     return;
   }
 
+  size_t* metadata_ptr = (size_t*)(p - sizeof(size_t) * 2);
+  if (metadata_ptr[0] == ALIGNED_ALLOC_MAGIC) {
+    void *original_ptr = (void*)metadata_ptr[1];
+    heap_free(&g_heap, original_ptr);
+    return;
+  }
+
   fprintf(stderr, "free(%p) - allocated with malloc/calloc/realloc, freeing directly.\n", p);
   heap_free(&g_heap, p);
+  fprintf(stderr, "free(%p) Success!\n", p);
 }
 
 void *realloc(void *p, size_t size)
@@ -128,23 +137,47 @@ void cfree(void *p)
   free(p);
 }
 
-void *aligned_alloc(size_t alignment, size_t size)
-{
-  fprintf(stderr, "aligned_alloc(%ld, %ld) called, using malloc.\n", alignment, size);
-  return malloc(size);
+
+void *aligned_alloc_custom(size_t alignment, size_t size) {
+  if (alignment == 0 || (alignment & (alignment - 1)) != 0) {
+    errno = EINVAL;
+    return NULL; // Alignment must be a power of 2
+  }
+
+  if (size == 0) return NULL; // malloc(0) 的行为依赖于实现
+
+  // 1. Allocate extra memory to ensure alignment can be met and store metadata.
+  size_t total_size = size + 2 * alignment + sizeof(size_t) * 2; // Extra space for alignment + metadata
+
+  void *ptr = malloc(total_size);
+  if (ptr == NULL) {
+    return NULL;
+  }
+
+  // 2. Calculate the aligned address.
+  uintptr_t raw_address = (uintptr_t)ptr;
+  uintptr_t aligned_address = (raw_address + alignment + sizeof(size_t) * 2) & ~(alignment - 1);
+
+  // 3. Store the original pointer and magic number before the aligned address.
+  size_t* metadata_ptr = (size_t*)(aligned_address - sizeof(size_t) * 2);
+  metadata_ptr[0] = ALIGNED_ALLOC_MAGIC;
+  metadata_ptr[1] = (size_t)ptr; // Store the original pointer
+
+  // 4. Return the aligned address.
+  return (void *)aligned_address;
 }
 
 int posix_memalign(void **memptr, size_t alignment, size_t size)
 {
   fprintf(stderr, "posix_memalign(0x%lx, %ld, %ld) called, using malloc.\n", (unsigned long)memptr, alignment, size);
-  *memptr = malloc(size);
+  *memptr = aligned_alloc_custom(alignment, size);
   return (*memptr == NULL) ? ENOMEM : 0;
 }
 
 void *memalign(size_t alignment, size_t size)
 {
   fprintf(stderr, "memalign(%ld, %ld) called, using malloc.\n", alignment, size);
-  return malloc(size);
+  return aligned_alloc_custom(alignment, size);
 }
 
 void *valloc(size_t size)
